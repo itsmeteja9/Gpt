@@ -1,0 +1,60 @@
+#!/bin/bash -e
+
+# Define JSON template path
+JSON_TEMPLATE="reusable-metrics-workflows/.github/custom_properties_params.json"
+
+# Verify if JSON file exists
+if [ ! -f "$JSON_TEMPLATE" ]; then
+    echo "Error: JSON template not found."
+    exit 1
+fi
+
+# Define output file
+OUTPUT_FILE="updated_properties.json"
+
+# Ensure config_env.txt exists
+CONFIG_FILE="config_env.txt"
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "Warning: config_env.txt not found. All placeholders will be replaced with 'NO'."
+    touch "$CONFIG_FILE"  # Create empty file to avoid errors in loop
+fi
+
+# Load key-value pairs from config_env.txt into a Bash associative array
+declare -A config_values
+while IFS='=' read -r key value; do
+    # Ignore empty lines and comments
+    if [[ -z "$key" || "$key" =~ ^# ]]; then
+        continue
+    fi
+
+    # Trim whitespace
+    key=$(echo "$key" | xargs)
+    value=$(echo "$value" | xargs)
+
+    # Convert boolean values accordingly
+    if [[ "$value" == "true" ]]; then
+        value="YES"
+    elif [[ "$value" == "false" || -z "$value" ]]; then
+        value="NO"
+    fi
+
+    # Store key-value pair
+    config_values["$key"]="$value"
+done < "$CONFIG_FILE"
+
+# Use jq to update JSON
+jq --argfile env <(printf '%s\n' "${!config_values[@]}" | jq -Rn '
+    [inputs | {key: ., value: env[.] // "NO"}] | from_entries') '
+  map(
+    .value |= (if test("\\{\\{.*\\}\\}") then 
+      (env[.value | sub("\\{\\{|\\}\\}"; "")] // "NO") 
+    else . end)
+  )
+' "$JSON_TEMPLATE" > "$OUTPUT_FILE"
+
+# Output updated JSON file
+echo "Updated JSON:"
+cat "$OUTPUT_FILE"
+
+# Store final JSON file path in GitHub environment
+echo "FINAL_PARAMS_JSON=$OUTPUT_FILE" >> $GITHUB_ENV
