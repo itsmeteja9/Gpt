@@ -1,0 +1,58 @@
+#!/bin/bash -e
+
+# Define JSON template path
+JSON_TEMPLATE="reusable-metrics-workflows/.github/custom_properties_params.json"
+
+# Verify if JSON file exists
+if [ ! -f "$JSON_TEMPLATE" ]; then
+    echo "Error: JSON template not found."
+    exit 1
+fi
+
+# Define output file
+OUTPUT_FILE="updated_properties.json"
+
+# Copy JSON template to output file
+cp "$JSON_TEMPLATE" "$OUTPUT_FILE"
+
+# Ensure config_env.txt exists
+CONFIG_FILE="config_env.txt"
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "Error: config_env.txt not found."
+    exit 1
+fi
+
+# Read key-value pairs from config_env.txt and update placeholders in JSON
+while IFS='=' read -r key value; do
+    # Ignore empty lines and comments
+    if [[ -z "$key" || "$key" =~ ^# ]]; then
+        continue
+    fi
+
+    # Trim whitespace
+    key=$(echo "$key" | xargs)
+    value=$(echo "$value" | xargs)
+
+    # Ensure values are non-empty
+    if [[ -z "$key" || -z "$value" ]]; then
+        continue
+    fi
+
+    # Define placeholder format {{key}}
+    placeholder="{{${key}}}"
+
+    # Use jq to replace placeholder values in JSON
+    jq --arg placeholder "$placeholder" --arg value "$value" '
+        map(if .value == $placeholder then .value = $value else . end)
+    ' "$OUTPUT_FILE" > tmp.json && mv tmp.json "$OUTPUT_FILE"
+
+    echo "Updated: $placeholder -> $value"
+
+done < "$CONFIG_FILE"
+
+# Output updated JSON file
+echo "Updated JSON:"
+cat "$OUTPUT_FILE"
+
+# Store final JSON file path in GitHub environment
+echo "FINAL_PARAMS_JSON=$OUTPUT_FILE" >> $GITHUB_ENV
